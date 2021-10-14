@@ -25,4 +25,3 @@ def ping_server():
   '''
   t = Thread(target=run);
   t.start();
-  

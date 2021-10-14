@@ -5,8 +5,14 @@ cmds_ = [
   {
     "name": "predict",
     "description": "Gives a random response to predict what you ask.",
-    "Type": "Misc", 
+    "type": "Misc", 
     "args": "<question>"
+  },
+
+  {
+    "name": "snipe",
+    "description": "Sends the most recently deleted message.",
+    "type": "Misc"
   },
   
   {

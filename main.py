@@ -1,5 +1,5 @@
 # General Imports #
-import discord, qikdb, os, random, requests, urllib, youtube_dl, bs4;
+import discord, qikdb, os, random, requests, urllib, youtube_dl, bs4, nacl, ffmpeg;
 
 # From Imports #
 from bs4 import BeautifulSoup;
@@ -9,6 +9,8 @@ from time import sleep as wait;
 from datetime import datetime;
 from cmds import cmds_ as commands_list;
 from pygelbooru import Gelbooru as Gel;
+from youtubesearchpython import VideosSearch;
+from replit import audio;
 
 # Discord Imports #
 import discord.ext;
@@ -33,11 +35,7 @@ qik = DB(config = {
 
 # Functions #
 def isadmin(ctx):
-    if not qik.exists(f"adminrole.{ctx.guild.id}"):
-      qik.set(f"adminrole.{ctx.guild.id}", "Zyten Admin");
-    a_role = qik.get(f"adminrole.{ctx.guild.id}");
-
-    if "Zyten Admin" in ctx.author.roles or a_role in ctx.author.roles:
+    if "Zyten Admin" in ctx.author.roles:
       return True;
     else:
       return False;
@@ -47,7 +45,25 @@ def isadmin(ctx):
 @bot.event
 async def on_ready():
     os.system("clear");
-    print(f"Logged in as {bot.user} at {timestamp}.");
+    print(f"\u001b[32m- Logged in as {bot.user}.");
+    print(f"\u001b[32m- Login time {timestamp}.");
+    print("\u001b[37m--------------------------------------\n");
+
+@bot.event
+async def on_message_delete(msg):
+    message = {
+      "author": msg.author.name,
+      "avatar": msg.author.avatar_url,
+      "content": msg.content, 
+      "time-sent": timestamp
+    };
+    pass; # place holder
+
+@bot.event
+async def on_command_error(error, ctx):
+    if isinstance(error, commands.CommandNotFound):
+        error_embed = discord.Embed(title = "***Command Not Found:***", description = "*The command you entered does not exist use `{os.environ['PREFIX']}help` to see our list of commands.", color = colors['err']);
+        await ctx.send(embed = error_embed);
 
 @bot.event
 async def on_message(msg):
@@ -116,6 +132,23 @@ async def help(ctx, *args):
     await ctx.send(embed = help_embed);
 
 # MISC Commands #
+
+@bot.command(name = "forest", aliases = ["maverick"])
+async def forest(ctx):
+    lp_embed = discord.Embed(title = "You stumble across a wild Logan Paul", color = discord.Color.from_rgb(255, 255, 255));
+    lp_embed.set_image(url = "attachment://Assets/emo_logan_paul.png")
+    pass;
+
+@bot.command(name = "snipe")
+async def snipe(ctx):
+    snipe = qik.get(f"snipe.{ctx.guild.id}");
+
+    snipe_embed = discord.Embed(title = f"***{snipe['author']}:***", description = f"{snipe['content']}", color = discord.Color.from_rgb(255, 255, 255));
+    snipe_embed.set_footer(text = f"Sent at: {snipe['sent-at']}");
+    snipe_embed.set_image(url = snipe['avatar']);
+
+    await ctx.send(embed = snipe_embed);
+
 @bot.command(name = "predict", aliases = ["8ball", "guess"])
 async def predict(ctx):
     responses = ["Yes.", "No.", "Maybe.", "Certainly.", "For sure.", "Never.", "In your dreams."];
@@ -133,9 +166,9 @@ async def join(ctx):
             channel = ctx.author.voice.channel;
             await channel.connect();
         except Exception as err:
-            ctx.send(f"I could not connect to the voice channel.\n\nDiscord PY Exception: {err}");
+            await ctx.send(f"I could not connect to the voice channel.\n\nDiscord PY Exception: {err}");
     else:
-        ctx.send("You are not connected to a VC.");
+        await ctx.send("You are not connected to a VC.");
 
 @bot.command(name = "leave", aliases = ["disconnect", "unsummon", "fuckoff"])
 async def leave(ctx):
@@ -143,11 +176,40 @@ async def leave(ctx):
       try:
           await ctx.voice_client.disconnect();
       except Exception as err:
-          ctx.send(f"I could not disconnect from the voice channel.\n\nDiscord PY Exception: {err}");   
+          await ctx.send(f"I could not disconnect from the voice channel.\n\nDiscord PY Exception: {err}");   
 
-@bot.command(name = "play")
+@bot.command(name = "play", aliases = ["q", "queue"])
 async def play(ctx, *args):
+    if not ctx.voice_client and ctx.author.voice.channel:
+        try: 
+            vc = ctx.author.voice.channel;
+            await vc.connect();
+        except Exception as err:
+            print(err)
     title = " ".join(args);
+
+    search = VideosSearch(title, limit = 4);
+    URL = search.result()["result"][0]["link"];
+
+    Title = search.result()["result"][0]["title"];
+
+    ydl_opts = {
+      'format': 'bestaudio/best',
+      'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+      }],
+      'outtmpl': f'./Assets/{Title}.mp3'
+    }
+
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        try:
+            ydl.download(["https://www.youtube.com/watch?v=ZoG5jJ3E8rg"]);
+        except:
+            print("I could not find the given video link.");
+
+    vc.play(discord.FFmpegPCMAudio(f"./Assets/{Title}.mp3"))
 
 # Automation Commands #
 @bot.command(name = "automod", aliases = ["amod"])
@@ -167,6 +229,8 @@ async def automod(ctx, *args):
                 await ctx.send(embed = error_embed);
         else:
             error_embed = discord.Embed(title = "***Invalid Args Amount:**", description = "*Error - `Invalid amount of arguments provided.`*");
+
+            await ctx.send(embed = error_embed);
     else:
         error_embed = discord.Embed(title = "***Invalid Permissions:***", description = "*Error - `You do not have valid permissions to enable/disable automod in this guild.`*", color = colors["err"]);
 
@@ -194,6 +258,15 @@ async def kick(ctx, member : discord.Member, *args):
     if kick_perms or isadmin(ctx):
         try:
             given_reason = " ".join(args[0:]);
+            dm = await member.create_dm();
+            
+            if given_reason == None:
+                given_reason = "Breaking the rules.";
+
+            notify_embed = discord.Embed(title = f"Moderation Notice:", description = f"You have been kicked from {ctx.guild.name}.\n\nReason: {given_reason}", color = colors['mod'])
+
+            await dm.send(embed = notify_embed);
+
             await member.kick(reason = given_reason);
 
             kicked_embed = discord.Embed(title = "**Moderation:***", description = f"*Kicked: {member.mention}\nReason: `{given_reason}`*", color = colors["mod"]);
@@ -203,7 +276,8 @@ async def kick(ctx, member : discord.Member, *args):
         except Exception as err:
             error_embed = discord.Embed(title = "***Error:***", description = f"*Error Message - `{err}`*");
             error_embed.set_footer(text = f" Sent at: {timestamp}");
-
+            
+            print(err)
             await ctx.send(embed = error_embed);
 
 @bot.command(name = "ban")
@@ -213,6 +287,15 @@ async def ban(ctx, member: discord.Member, *args):
     if ban_perms or isadmin(ctx):
         try:
             given_reason = " ".join(args[0:]);
+            dm = await member.create_dm();
+            
+            if given_reason == None:
+                given_reason = "Breaking the rules.";
+
+            notify_embed = discord.Embed(title = f"Moderation Notice:", description = f"You have been banned from {ctx.guild.name}.\n\nReason: {given_reason}", color = colors['mod'])
+
+            await dm.send(embed = notify_embed);
+
             await member.ban(reason = given_reason);
 
             banned_embed = discord.Embed(title = "***Moderation:***", description = f"*Banned: {member.mention}\nReason: `{given_reason}`*", color = discord.Color.from_rgb(87, 64, 255));
@@ -234,15 +317,20 @@ async def ban(ctx, member: discord.Member, *args):
 @bot.command(name = "neko")
 async def neko(ctx):
     if ctx.channel.nsfw:
-        res = requests.get("https://nekos.life/lewd");
-        bs = BeautifulSoup(res.content, "html.parser");
-        img_url = bs.find("img").attrs["src"];
+      try:
+          res = requests.get("https://nekos.life/lewd");
+          bs = BeautifulSoup(res.content, "html.parser");
+          img_url = bs.find("img").attrs["src"];
 
-        neko_embed = discord.Embed(title = "***Neko:***", color = colors["nsfw"], url = img_url)
-        neko_embed.set_image(img_url);
-        neko_embed.set_footer(text = f"Sent at {timestamp} || Scraped from https://nekos.life/lewd");
+          neko_embed = discord.Embed(title = "***Neko:***", color = colors["nsfw"], url = img_url)
+          neko_embed.set_image(url = img_url);
+          neko_embed.set_footer(text = f"Sent at {timestamp} || Scraped from https://nekos.life/lewd");
 
-        await ctx.send(embed = neko_embed)
+          await ctx.send(embed = neko_embed)
+      except Exception as err:
+          owner = ctx.guild.owner;
+          dm = await owner.create_dm();
+          await dm.send(err);
     else:
       error_embed = discord.Embed(title = "***error:***", description = "*error - `this command can only be used in NSFW channels.`*", color = colors['err'])
 
@@ -252,19 +340,22 @@ async def neko(ctx):
 async def hentai(ctx, *args):
     gb = Gel();
     if ctx.channel.nsfw:
-        if len(args) < 1:
-            posts = await gb.search_posts(tags = ["hentai"], exclude_tags = ["video", "mp4"]);
-            img_url = random.choice(posts);
+        try:
+            if len(args) < 1:
+                posts = await gb.search_posts(tags = ["hentai"], exclude_tags = ["video", "mp4", "gif"]);
+                img_url = random.choice(posts);
 
-        else:
-            posts = await gb.search_posts(tags = args, exclude_tags = ["video", "mp4"]);
-            img_url = random.choice(posts);
-        
-        hentai_embed = discord.Embed(title = "***Hentai:***", color = colors["nsfw"], url = img_url);
-        hentai_embed.set_image(img_url);
-        hentai_embed.set_footer(text = f"Sent at {timestamp} || Scraped from https://gelbooru.com");
+            else:
+                posts = await gb.search_posts(tags = args, exclude_tags = ["video", "mp4"]);
+                img_url = random.choice(posts);
+            
+            hentai_embed = discord.Embed(title = "***Hentai:***", color = colors["nsfw"], url = img_url);
+            hentai_embed.set_image(url = img_url);
+            hentai_embed.set_footer(text = f"Sent at {timestamp} || Scraped from https://gelbooru.com");
 
-        await ctx.send(embed = hentai_embed);
+            await ctx.send(embed = hentai_embed);
+        except Exception as err:
+            await ctx.send(err);
     else:
         error_embed = discord.Embed(title = "***error:***", description = "*error - `this command can only be used in NSFW channels.`*", color = colors['err'])
 
